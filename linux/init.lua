@@ -1,5 +1,5 @@
 -- Set the leader key to space
-vim.g.mapleader = " " 
+vim.g.mapleader = " "
 
 -- Ensure Packer is installed
 local ensure_packer = function()
@@ -15,7 +15,6 @@ ensure_packer()
 
 -- Use Packer to manage plugins
 require('packer').startup(function(use)
-  -- Packer manages itself
   use 'wbthomason/packer.nvim'
 
   -- File Explorer
@@ -57,6 +56,7 @@ require('packer').startup(function(use)
     run = ':TSUpdate',
     config = function()
       require('nvim-treesitter.configs').setup {
+        ensure_installed = { "c", "cpp", "lua", "python", "typescript", "javascript" },
         highlight = { enable = true, additional_vim_regex_highlighting = false },
       }
     end
@@ -67,8 +67,48 @@ require('packer').startup(function(use)
     'neovim/nvim-lspconfig',
     config = function()
       local lspconfig = require('lspconfig')
+
+      -- TypeScript/JavaScript
       lspconfig.ts_ls.setup({})
-      lspconfig.pyright.setup {}   -- Python
+
+      -- Python
+      lspconfig.pyright.setup({})
+
+      -- C/C++ (Clangd)
+      lspconfig.clangd.setup({
+        cmd = { "clangd", "--background-index" },
+        filetypes = { "c", "cpp", "objc", "objcpp" },
+        root_dir = lspconfig.util.root_pattern("compile_commands.json", "compile_flags.txt", ".git"),
+      })
+    end
+  }
+
+  -- Debug Adapter Protocol (DAP) for C++
+  use {
+    'mfussenegger/nvim-dap',
+    config = function()
+      local dap = require('dap')
+
+      dap.adapters.cppdbg = {
+        id = 'cppdbg',
+        type = 'executable',
+        command = '/path/to/cpptools/extension/debugAdapters/bin/OpenDebugAD7',
+      }
+
+      dap.configurations.cpp = {
+        {
+          name = "Launch file",
+          type = "cppdbg",
+          request = "launch",
+          program = function()
+            return vim.fn.input('Path to executable: ', vim.fn.getcwd() .. '/', 'file')
+          end,
+          cwd = '${workspaceFolder}',
+          stopOnEntry = false,
+        }
+      }
+
+      dap.configurations.c = dap.configurations.cpp
     end
   }
 
@@ -99,7 +139,9 @@ require('packer').startup(function(use)
         sources = cmp.config.sources({
           { name = 'nvim_lsp' },
           { name = 'luasnip' },
-        }, { { name = 'buffer' } })
+          { name = 'buffer' },
+          { name = 'path' },
+        })
       })
     end
   }
@@ -115,8 +157,6 @@ require('packer').startup(function(use)
     end
   }
 
-  -- Indentation Guides
-  use 'lukas-reineke/indent-blankline.nvim'
   -- Color Scheme
   use {
     'folke/tokyonight.nvim',
@@ -124,12 +164,6 @@ require('packer').startup(function(use)
       vim.cmd[[colorscheme tokyonight]]
     end
   }
-
-  -- TidalCycles
-  use 'tidalcycles/vim-tidal'
-
-  -- SuperCollider Plugin
-  use 'davidgranstrom/scnvim'
 end)
 
 -- Better Indentation Handling
@@ -137,11 +171,15 @@ vim.api.nvim_create_autocmd('FileType', {
   pattern = '*',
   callback = function()
     local ft = vim.bo.filetype
-    if ft == 'tidal' or ft == 'javascript' or ft == 'typescript' then
+    if ft == 'javascript' or ft == 'typescript' then
       vim.opt_local.tabstop = 2
       vim.opt_local.shiftwidth = 2
       vim.opt_local.expandtab = true
     elseif ft == 'python' then
+      vim.opt_local.tabstop = 4
+      vim.opt_local.shiftwidth = 4
+      vim.opt_local.expandtab = true
+    elseif ft == 'cpp' or ft == 'c' then
       vim.opt_local.tabstop = 4
       vim.opt_local.shiftwidth = 4
       vim.opt_local.expandtab = true
@@ -153,32 +191,24 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- Tidal Interpreter and Boot script
-vim.g.tidal_interpreter = "ghci"
-vim.g.tidal_boot = "C:/Users/xenomorph/AppData/Local/nvim-data/site/pack/packer/start/vim-tidal/Tidal.ghci"
-
--- Custom Tidal Keybindings
-vim.api.nvim_set_keymap('n', '<leader>ts', ':TidalSend<CR>', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('n', '<leader>th', ':TidalHush<CR>', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('v', '<leader>ts', ':TidalSend<CR>', { noremap = true, silent = true })
-
--- SuperCollider (scnvim) Configuration
-local scnvim = require 'scnvim'
-scnvim.setup({
-  keymaps = {
-    ['<M-e>'] = scnvim.map('editor.send_line', {'i', 'n'}),
-    ['<C-e>'] = { scnvim.map('editor.send_block', {'i', 'n'}), scnvim.map('editor.send_selection', 'x') },
-    ['<CR>'] = scnvim.map('postwin.toggle'),
-    ['<M-CR>'] = scnvim.map('postwin.toggle', 'i'),
-    ['<M-L>'] = scnvim.map('postwin.clear', {'n', 'i'}),
-    ['<C-k>'] = scnvim.map('signature.show', {'n', 'i'}),
-    ['<F12>'] = scnvim.map('sclang.hard_stop', {'n', 'x', 'i'}),
-    ['<leader>st'] = scnvim.map('sclang.start'),
-    ['<leader>sk'] = scnvim.map('sclang.recompile'),
-    ['<F1>'] = scnvim.map_expr('s.boot'),
-    ['<F2>'] = scnvim.map_expr('s.meter'),
-  },
-  postwin = { float = { enabled = true } },
-  sclang = { cmd = 'C:/Program Files/SuperCollider-3.12.1/sclang.exe' }
+-- Format C++ files on save
+vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = "*.cpp,*.h,*.c",
+  callback = function()
+    vim.lsp.buf.format()
+  end
 })
+
+-- Set Python provider
+vim.g.python3_host_prog = '/usr/bin/python3'
+
+-- Disable unused providers
+vim.g.loaded_ruby_provider = 0
+vim.g.loaded_perl_provider = 0
+
+
+-- M-x like functionality in Neovim with Telescope
+vim.api.nvim_set_keymap('n', '<leader>m', ':Telescope commands<CR>', { noremap = true, silent = true })
+
+
 
